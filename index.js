@@ -1,81 +1,219 @@
 const express = require('express')
-const cors = require('cors');
+const cors = require('cors')
+require('dotenv').config()
 
-const app = express();
-require('dotenv').config();
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
+const app = express()
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb')
+const stripe = require('stripe')(process.env.STRIPE_SECRET)
 
-const port = process.env.PORT || 3000
+const port = process.env.PORT || 5000
 
-//middleware
-app.use(express.json());
-app.use(cors());
+// Middleware
+app.use(express.json())
+app.use(cors())
 
-const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.8v42xkx.mongodb.net/?appName=Cluster0`;
+const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASS}@cluster0.8v42xkx.mongodb.net/?appName=Cluster0`
 
-// Create a MongoClient with a MongoClientOptions object to set the Stable API version
 const client = new MongoClient(uri, {
   serverApi: {
     version: ServerApiVersion.v1,
     strict: true,
     deprecationErrors: true,
-  }
-});
+  },
+})
 
 async function run() {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    await client.connect()
+    console.log('MongoDB connected ✅')
 
-    const db = client.db('zap_shift_db');
-    const parcelsCollection = db.collection('parcels');
+    const db = client.db('zap_shift_db')
+    const parcelsCollection = db.collection('parcels')
+    const paymentsCollection = db.collection('payments')
 
-    //parcel API
-    app.get('/parcels',async(req,res)=>{
+    // ==============================
+    // PARCEL ROUTES
+    // ==============================
+
+    app.get('/parcels', async (req, res) => {
+      try {
         const query = {}
-        const {email} = req.query;
-
-        if(email){
-            query.senderEmail = email;
+        if (req.query.email) {
+          query.senderEmail = req.query.email
         }
 
-        const cursor = parcelsCollection.find(query);
-        const result = await cursor.toArray();
-        res.send(result);
-    })
-    app.post('/parcels',async(req,res)=>{
-        const parcel = req.body;
-
-        //parcel created time
-        parcel.createdAt = new Date();
-        const result = await parcelsCollection.insertOne(parcel);
-        res.send(result);
+        const result = await parcelsCollection.find(query).toArray()
+        res.send(result)
+      } catch (error) {
+        res.status(500).send({ error: 'Failed to fetch parcels' })
+      }
     })
 
-    app.delete('/parcels/:id',async(req,res)=>{
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id)}
-
-      const result = await parcelsCollection.deleteOne(query);
-      res.send(result);
+    app.get('/parcels/:id', async (req, res) => {
+      try {
+        const result = await parcelsCollection.findOne({
+          _id: new ObjectId(req.params.id),
+        })
+        res.send(result)
+      } catch {
+        res.status(400).send({ error: 'Invalid parcel ID' })
+      }
     })
 
+    app.post('/parcels', async (req, res) => {
+      try {
+        const parcel = req.body
+        parcel.createdAt = new Date()
+        parcel.paymentStatus = 'pending'
 
+        const result = await parcelsCollection.insertOne(parcel)
+        res.send(result)
+      } catch {
+        res.status(500).send({ error: 'Failed to create parcel' })
+      }
+    })
 
-    // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log("Pinged your deployment. You successfully connected to MongoDB!");
+    app.delete('/parcels/:id', async (req, res) => {
+      try {
+        const result = await parcelsCollection.deleteOne({
+          _id: new ObjectId(req.params.id),
+        })
+        res.send(result)
+      } catch {
+        res.status(400).send({ error: 'Invalid parcel ID' })
+      }
+    })
+
+    // ==============================
+    // STRIPE CHECKOUT
+    // ==============================
+
+    app.post('/create-checkout-session', async (req, res) => {
+      try {
+        const { cost, parcelId, senderEmail, parcelName } = req.body
+
+        if (!cost || !parcelId || !senderEmail) {
+          return res.status(400).send({ error: 'Missing required fields' })
+        }
+
+        const amount = Math.round(Number(cost) * 100)
+
+        const session = await stripe.checkout.sessions.create({
+          payment_method_types: ['card'],
+          line_items: [
+            {
+              price_data: {
+                currency: 'usd',
+                unit_amount: amount,
+                product_data: {
+                  name: parcelName || 'Parcel Payment',
+                },
+              },
+              quantity: 1,
+            },
+          ],
+          mode: 'payment',
+          customer_email: senderEmail,
+          metadata: {
+            parcelId,
+            parcelName,
+          },
+          success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`,
+        })
+
+        res.send({ url: session.url })
+      } catch (error) {
+        console.error(error)
+        res.status(500).send({ error: 'Stripe session creation failed' })
+      }
+    })
+
+    // ==============================
+    // PAYMENT SUCCESS VERIFY
+    // ==============================
+
+    app.patch('/payment-success', async (req, res) => {
+      try {
+        const sessionId = req.query.session_id
+
+        if (!sessionId) {
+          return res.status(400).send({ error: 'Session ID missing' })
+        }
+
+        const session = await stripe.checkout.sessions.retrieve(sessionId)
+
+        if (session.payment_status !== 'paid') {
+          return res.status(400).send({
+            success: false,
+            message: 'Payment not completed',
+          })
+        }
+
+        const parcelId = session.metadata.parcelId
+        const transactionId = session.payment_intent
+
+        // Prevent duplicate payment insert
+        const existingPayment = await paymentsCollection.findOne({
+          transactionId,
+        })
+
+        if (existingPayment) {
+          return res.send({
+            success: true,
+            message: 'Payment already processed',
+          })
+        }
+
+        // Update parcel
+        const updateResult = await parcelsCollection.updateOne(
+          { _id: new ObjectId(parcelId) },
+          {
+            $set: {
+              paymentStatus: 'paid',
+              transactionId,
+              paidAt: new Date(),
+            },
+          }
+        )
+
+        // Save payment record
+        const paymentDoc = {
+          amount: session.amount_total / 100,
+          currency: session.currency,
+          customerEmail: session.customer_email,
+          parcelId,
+          parcelName: session.metadata.parcelName,
+          transactionId,
+          paymentStatus: session.payment_status,
+          paidAt: new Date(),
+          trackingId: '',
+        }
+
+        const paymentResult = await paymentsCollection.insertOne(paymentDoc)
+
+        res.send({
+          success: true,
+          parcelUpdated: updateResult.modifiedCount > 0,
+          paymentSaved: paymentResult.insertedId,
+        })
+      } catch (error) {
+        console.error(error)
+        res.status(500).send({ success: false })
+      }
+    })
+
+    await client.db('admin').command({ ping: 1 })
   } finally {
-    // Ensures that the client will close when you finish/error
-    //await client.close();
   }
 }
-run().catch(console.dir);
+
+run().catch(console.dir)
 
 app.get('/', (req, res) => {
-  res.send('zap shift!')
+  res.send('Zap Shift Server Running 🚀')
 })
 
 app.listen(port, () => {
-  console.log(`Example app listening on port ${port}`)
+  console.log(`Server running on port ${port}`)
 })
