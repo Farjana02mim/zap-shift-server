@@ -7,10 +7,42 @@ const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb')
 const stripe = require('stripe')(process.env.STRIPE_SECRET)
 
 const port = process.env.PORT || 5000
+const crypto = require("crypto");
+
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./zap-shift-f4d73-firebase-admin.json");
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
+
 
 // Middleware
 app.use(express.json())
 app.use(cors())
+const verifyFBToken = async(req,res,next)=>{
+
+  // console.log('headers in the Middleware',req.headers?.authorization);
+  const token = req.headers.authorization;
+
+  if(!token){
+    return res.status(401).send({message: 'unauthorized access'})
+  }
+
+  try{
+    const idToken = token.split(' ')[1];
+    const decoded = await admin.auth().verifyIdToken(idToken);
+    console.log('decoded in the token', decoded);
+    req.decoded_email = decoded.email;
+    next();
+  }
+  catch(err){
+    return res.status(401).send({message: 'unauthorized access'})
+  }
+
+  
+}
 
 // Generate Tracking ID
 function generateTrackingId() {
@@ -253,13 +285,21 @@ app.patch('/payment-success', async (req, res) => {
 })
 
     // payment related api
-    app.get('/payments',async(req,res)=>{
+    app.get('/payments',verifyFBToken,async(req,res)=>{
       const email = req.query.email;
       const query = {}
+
+      // console.log(req.headers);
+
       if(email){
-        query.customerEmail=email
+        query.customerEmail=email;
+
+        // check email address
+        if(email !== req.decoded_email){
+          return res.status(403).send({message: 'forbidden access'});
+        }
       }
-      const cursor = paymentsCollection.find(query);
+      const cursor = paymentsCollection.find(query).sort({paidAt: -1});
       const result = await cursor.toArray();
       res.send(result);
     })
