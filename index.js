@@ -66,8 +66,26 @@ async function run() {
     console.log('MongoDB connected ✅')
 
     const db = client.db('zap_shift_db')
+    const userCollection = db.collection('users');
     const parcelsCollection = db.collection('parcels')
     const paymentsCollection = db.collection('payments')
+
+    // users related api
+    app.post('/users',async(req, res)=>{
+      const user = req.body;
+      user.role = 'user';
+      user.createdAt = new Date();
+
+      const email = user.email;
+      const userExists = await userCollection.findOne({email})
+
+      if(userExists){
+        return res.send({message: 'user exists'})
+      }
+
+      const result = await userCollection.insertOne(user);
+      res.send(result);
+    })
 
     // ==============================
     // PARCEL ROUTES
