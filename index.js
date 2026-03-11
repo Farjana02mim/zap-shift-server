@@ -69,6 +69,7 @@ async function run() {
     const userCollection = db.collection('users');
     const parcelsCollection = db.collection('parcels')
     const paymentsCollection = db.collection('payments')
+    const ridersCollection = db.collection('riders')
 
     // users related api
     app.post('/users',async(req, res)=>{
@@ -319,6 +320,28 @@ app.patch('/payment-success', async (req, res) => {
       }
       const cursor = paymentsCollection.find(query).sort({paidAt: -1});
       const result = await cursor.toArray();
+      res.send(result);
+    })
+
+    // riders related api
+
+    app.get('/riders',async(req,res)=>{
+      const query = {}
+      if(req.query.status){
+        query.status = req.query.status;
+      }
+      const cursor = ridersCollection.find(query)
+      const result = await cursor.toArray();
+      res.send(result);
+    })
+
+
+    app.post('/riders',async(req,res)=>{
+      const rider = req.body;
+      rider.status = 'pending';
+      rider.createdAt = new Date();
+
+      const result = await ridersCollection.insertOne(rider);
       res.send(result);
     })
 
