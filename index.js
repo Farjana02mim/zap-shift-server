@@ -345,6 +345,34 @@ app.patch('/payment-success', async (req, res) => {
       res.send(result);
     })
 
+app.patch('/riders/:id', verifyFBToken, async (req, res) => {
+  try {
+    const status = req.body.status;
+    const id = req.params.id;
+
+    const filter = { _id: new ObjectId(id) };
+    const updateDoc = { $set: { status: status } };
+
+    const result = await ridersCollection.updateOne(filter, updateDoc);
+
+    if(status === 'approved'){
+      const email = req.body.email;
+      const userQuery = {email}
+      const updateUser = {
+        $set:{
+          role: 'rider'
+        }
+      }
+      const userResult = await userCollection.updateOne(userQuery,updateUser);
+    }
+
+    res.send(result);
+  } catch (error) {
+    console.error(error);
+    res.status(500).send({ message: 'Failed to update rider status', error: error.message });
+  }
+});
+
 
     await client.db('admin').command({ ping: 1 })
     console.log("MongoDB ping success ✅")
