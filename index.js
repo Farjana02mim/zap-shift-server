@@ -95,6 +95,17 @@ app.get('/users', verifyFBToken, async(req, res) => {
 
 })
 
+app.get('/users/:id',async(req, res) =>{
+
+})
+
+app.get('/users/:email/role',async(req, res) =>{
+  const email = req.params.email;
+  const query = {email}
+  const user = await userCollection.findOne(query);
+  res.send({role: user?.role || 'user'});
+})
+
 app.patch('/users/:id', verifyFBToken, async(req, res) => {
 
   const id = req.params.id;
