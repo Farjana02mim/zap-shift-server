@@ -88,6 +88,32 @@ async function run() {
       res.send(result);
     })
 
+app.get('/users', verifyFBToken, async(req, res) => {
+
+  const result = await userCollection.find().toArray();
+  res.send(result);
+
+})
+
+app.patch('/users/:id', verifyFBToken, async(req, res) => {
+
+  const id = req.params.id;
+  const roleInfo = req.body;
+
+  const query = { _id: new ObjectId(id) }
+
+  const updateDoc = {
+    $set: {
+      role: roleInfo.role
+    }
+  }
+
+  const result = await userCollection.updateOne(query, updateDoc)
+
+  res.send(result)
+
+})
+
     // ==============================
     // PARCEL ROUTES
     // ==============================
@@ -372,7 +398,6 @@ app.patch('/riders/:id', verifyFBToken, async (req, res) => {
     res.status(500).send({ message: 'Failed to update rider status', error: error.message });
   }
 });
-
 
     await client.db('admin').command({ ping: 1 })
     console.log("MongoDB ping success ✅")
