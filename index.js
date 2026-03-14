@@ -166,6 +166,10 @@ app.patch('/users/:id/role', verifyFBToken,verifyAdmin, async(req, res) => {
           query.senderEmail = req.query.email
         }
 
+        if (req.query.deliveryStatus) {
+          query.deliveryStatus = req.query.deliveryStatus
+        }
+
         const result = await parcelsCollection.find(query).toArray()
         res.send(result)
 
@@ -199,6 +203,7 @@ app.patch('/users/:id/role', verifyFBToken,verifyAdmin, async(req, res) => {
 
         parcel.createdAt = new Date()
         parcel.paymentStatus = 'pending'
+        parcel.deliveryStatus = 'pending-pickup'
 
         const result = await parcelsCollection.insertOne(parcel)
 
@@ -332,6 +337,7 @@ app.patch('/payment-success', async (req, res) => {
       {
         $set: {
           paymentStatus: 'paid',
+          deliveryStatus: 'pending-pickup',
           transactionId,
           trackingId,
           paidAt: new Date(),
@@ -416,7 +422,7 @@ app.patch('/riders/:id', verifyFBToken,verifyAdmin, async (req, res) => {
     const id = req.params.id;
 
     const filter = { _id: new ObjectId(id) };
-    const updateDoc = { $set: { status: status } };
+    const updateDoc = { $set: { status: status , workStatus: 'available'} };
 
     const result = await ridersCollection.updateOne(filter, updateDoc);
 
