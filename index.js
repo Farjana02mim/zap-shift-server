@@ -214,6 +214,33 @@ app.patch('/users/:id/role', verifyFBToken,verifyAdmin, async(req, res) => {
       }
     })
 
+    app.patch('/parcels/:id', async(req,res)=>{
+      const { riderId, riderName, riderEmail} = req.body;
+      const id = req.params.id;
+      const query = {_id: new ObjectId(id)}
+
+      const updateDoc = {
+        $set:{
+          deliveryStatus: 'driver_assigned',
+          riderId: riderId,
+          riderName: riderName,
+          riderEmail: riderEmail
+        }
+      }
+      const result = await parcelsCollection.updateOne(query, updateDoc)
+
+      // update riders information
+      const riderQuery = { _id: new ObjectId(riderId) }
+      const riderUpdatedDoc = {
+        $set: {
+          workStatus: 'in_delivery'
+        }
+      }
+      const riderResult = await ridersCollection.updateOne(riderQuery, riderUpdatedDoc);
+
+      res.send(riderResult);
+    })
+
 
     // Delete parcel
     app.delete('/parcels/:id', async (req, res) => {
@@ -397,9 +424,19 @@ app.patch('/payment-success', async (req, res) => {
     // riders related api
 
     app.get('/riders',async(req,res)=>{
+      const {status,district, workStatus} = req.query;
       const query = {}
-      if(req.query.status){
-        query.status = req.query.status;
+
+      if(status){
+        query.status = status;
+      }
+
+      if(district){
+        query.district = district
+      }
+
+      if(workStatus){
+        query.workStatus = workStatus
       }
       const cursor = ridersCollection.find(query)
       const result = await cursor.toArray();
